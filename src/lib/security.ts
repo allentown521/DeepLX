@@ -72,7 +72,7 @@ export function validateLanguageCode(langCode: string): string | null {
   // Check if language code matches expected pattern (alphanumeric and hyphens only)
   const normalized = langCode.toLowerCase().trim();
 
-  if (normalized.length < 2 || normalized.length > 5) {
+  if (normalized.length < 2 || normalized.length > 10) {
     return null;
   }
 
