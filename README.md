@@ -3,16 +3,22 @@
 ***[汉语](README.zh.md)***
 
 [![License](https://img.shields.io/github/license/xixu-me/deeplx)](#-license)
-[![Deployment Status](https://img.shields.io/website?url=https://dplx.xi-xu.me/translate&label=Online%20Service)](#-online-service)
+[![Deployment Status](https://img.shields.io/website?url=https://dplx.xi-xu.me/deepl&label=Online%20Service)](#-online-service)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange?logo=cloudflare)](#-self-deployment)
 
-Currently, the best serverless implementation of [DeepLX](https://github.com/OwO-Network/DeepLX), optimized for Cloudflare Workers. Through intelligent proxy endpoint rotation, advanced rate limiting algorithms, and circuit breaker mechanisms, it almost completely avoids HTTP 429 errors, providing higher request rate limits and lower network round-trip times than the DeepL API.
+Currently, the best serverless implementation of [DeepLX](https://github.com/OwO-Network/DeepLX), optimized for Cloudflare Workers. Through intelligent proxy endpoint rotation, advanced rate limiting algorithms, and circuit breaker mechanisms, it almost completely avoids HTTP 429 errors, providing higher request rate limits and lower network round-trip times than traditional translation APIs. **Now supports both DeepL and Google Translate services.**
 
-## 🆓 **Completely FREE Alternative to DeepL API**
+## 🆓 **Completely FREE Alternative to Translation APIs**
 
-**Unlike the paid DeepL API, DeepLX is completely free to use** - no API keys, no subscription fees, no usage limits. Simply deploy once and enjoy unlimited translation requests without any cost concerns.
+**Unlike paid translation APIs, DeepLX is completely free to use** - no API keys, no subscription fees, no usage limits. Simply deploy once and enjoy unlimited translation requests without any cost concerns.
 
 ## ✨ Features & Performance Advantages
+
+### 🌐 Multi-Provider Support
+
+- **DeepL Translation** (`/deepl`) - High-quality translation with advanced AI
+- **Google Translate** (`/google`) - Wide language support and fast processing  
+- **Legacy Compatibility** (`/translate`) - Backward compatible endpoint using DeepL
 
 ### 🚀 Performance Advantages
 
@@ -70,60 +76,95 @@ graph TB
         Router[Hono Router]
         
         subgraph "API Endpoints"
+            DeepL[POST /deepl]
+            Google[POST /google]
             Translate[POST /translate]
             Debug[POST /debug]
         end
         
-        subgraph "Core Components"
+        subgraph "Core Middleware & Components"
+            CORS[CORS Handler]
             Security[Security Middleware]
             RateLimit[Rate Limiting System]
-            Cache[Dual-layer Cache]
-            Query[Translation Engine]
-            Proxy[Proxy Management]
+            Cache[Dual-layer Cache<br/>Memory + KV]
+        end
+        
+        subgraph "Translation Services"
+            QueryEngine[DeepL Query Engine]
+            GoogleService[Google Translate Service]
+        end
+        
+        subgraph "Support Systems"
+            ProxyManager[Proxy Manager<br/>& Load Balancer]
+            CircuitBreaker[Circuit Breaker]
+            RetryLogic[Retry Logic]
+            ErrorHandler[Error Handler]
         end
     end
 
     %% Storage Layer
     subgraph "Cloudflare Storage"
-        CacheKV[(Cache KV)]
-        RateLimitKV[(Rate Limit KV)]
-        Analytics[(Analytics Engine)]
+        CacheKV[(Cache KV<br/>Translation Results)]
+        RateLimitKV[(Rate Limit KV<br/>Token Buckets)]
+        Analytics[(Analytics Engine<br/>Metrics & Monitoring)]
     end
 
     %% External Services
-    subgraph "Translation Service"
-        XDPL[XDPL Proxy Cluster<br/>Vercel Deployment]
+    subgraph "External Translation APIs"
+        DeepLAPI[DeepL JSONRPC API<br/>www2.deepl.com]
+        GoogleAPI[Google Translate API<br/>translate.google.com]
+        XDPL[XDPL Proxy Cluster<br/>Multiple Vercel Instances]
     end
 
-    %% Connections
+    %% Request Flow Connections
     APIClient --> Router
-    Router --> Translate
-    Router --> Debug
+    Router --> CORS
+    CORS --> DeepL
+    CORS --> Google
+    CORS --> Translate
+    CORS --> Debug
     
+    DeepL --> Security
+    Google --> Security
     Translate --> Security
+    Debug --> Security
+    
     Security --> RateLimit
     RateLimit --> Cache
-    Cache --> Query
-    Query --> Proxy
     
+    Cache --> QueryEngine
+    Cache --> GoogleService
+    
+    QueryEngine --> ProxyManager
+    GoogleService --> GoogleAPI
+    
+    ProxyManager --> CircuitBreaker
+    CircuitBreaker --> RetryLogic
+    RetryLogic --> ErrorHandler
+    
+    %% External API Connections
+    ProxyManager -.-> XDPL
+    XDPL -.-> DeepLAPI
+    
+    %% Storage Connections
     Cache -.-> CacheKV
     RateLimit -.-> RateLimitKV
-    Query -.-> Analytics
-    
-    Proxy --> XDPL
+    Router -.-> Analytics
 
     %% Styles
-    classDef clientClass fill:#e3f2fd,stroke:#1976d2
-    classDef workerClass fill:#f3e5f5,stroke:#7b1fa2
-    classDef coreClass fill:#e8f5e8,stroke:#388e3c
-    classDef storageClass fill:#fff3e0,stroke:#f57c00
-    classDef externalClass fill:#ffebee,stroke:#d32f2f
+    classDef clientClass fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef workerClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef middlewareClass fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef serviceClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef storageClass fill:#fce4ec,stroke:#e91e63,stroke-width:2px
+    classDef externalClass fill:#ffebee,stroke:#d32f2f,stroke-width:2px
 
     class APIClient clientClass
-    class Router,Translate,Debug workerClass
-    class Security,RateLimit,Cache,Query,Proxy coreClass
+    class Router,DeepL,Google,Translate,Debug workerClass
+    class CORS,Security,RateLimit,Cache middlewareClass
+    class QueryEngine,GoogleService,ProxyManager,CircuitBreaker,RetryLogic,ErrorHandler serviceClass
     class CacheKV,RateLimitKV,Analytics storageClass
-    class XDPL externalClass
+    class DeepLAPI,GoogleAPI,XDPL externalClass
 ```
 
 ## 🌐 Online Service
@@ -132,7 +173,33 @@ graph TB
 
 ## 📦 Quick Start
 
-### cURL Example
+### cURL Examples
+
+#### DeepL Translation (Recommended)
+
+```bash
+curl -X POST https://dplx.xi-xu.me/deepl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello, world!",
+    "source_lang": "EN",
+    "target_lang": "ZH"
+  }'
+```
+
+#### Google Translate
+
+```bash
+curl -X POST https://dplx.xi-xu.me/google \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello, world!",
+    "source_lang": "EN",
+    "target_lang": "ZH"
+  }'
+```
+
+#### Legacy Endpoint (DeepL)
 
 ```bash
 curl -X POST https://dplx.xi-xu.me/translate \
@@ -144,11 +211,13 @@ curl -X POST https://dplx.xi-xu.me/translate \
   }'
 ```
 
-### JavaScript Example
+### JavaScript Examples
+
+#### DeepL Translation (JavaScript)
 
 ```javascript
-async function translate(text, sourceLang = 'auto', targetLang = 'zh') {
-  const response = await fetch('https://dplx.xi-xu.me/translate', {
+async function translateWithDeepL(text, sourceLang = 'auto', targetLang = 'zh') {
+  const response = await fetch('https://dplx.xi-xu.me/deepl', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -165,19 +234,47 @@ async function translate(text, sourceLang = 'auto', targetLang = 'zh') {
 }
 
 // Usage example
-translate('Hello, world!', 'en', 'zh')
+translateWithDeepL('Hello, world!', 'en', 'zh')
   .then(result => console.log(result))
   .catch(error => console.error(error));
 ```
 
-### Python Example
+#### Google Translate (JavaScript)
+
+```javascript
+async function translateWithGoogle(text, sourceLang = 'auto', targetLang = 'zh') {
+  const response = await fetch('https://dplx.xi-xu.me/google', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      text: text,
+      source_lang: sourceLang,
+      target_lang: targetLang
+    })
+  });
+  
+  const result = await response.json();
+  return result.data;
+}
+
+// Usage example
+translateWithGoogle('Hello, world!', 'en', 'zh')
+  .then(result => console.log(result))
+  .catch(error => console.error(error));
+```
+
+### Python Examples
+
+#### DeepL Translation (Python)
 
 ```python
 import requests
 import json
 
-def translate(text, source_lang='auto', target_lang='zh'):
-    url = 'https://dplx.xi-xu.me/translate'
+def translate_with_deepl(text, source_lang='auto', target_lang='zh'):
+    url = 'https://dplx.xi-xu.me/deepl'
     data = {
         'text': text,
         'source_lang': source_lang,
@@ -194,7 +291,37 @@ def translate(text, source_lang='auto', target_lang='zh'):
 
 # Usage example
 try:
-    result = translate('Hello, world!', 'en', 'zh')
+    result = translate_with_deepl('Hello, world!', 'en', 'zh')
+    print(result)
+except Exception as e:
+    print(f"Error: {e}")
+```
+
+#### Google Translate (Python)
+
+```python
+import requests
+import json
+
+def translate_with_google(text, source_lang='auto', target_lang='zh'):
+    url = 'https://dplx.xi-xu.me/google'
+    data = {
+        'text': text,
+        'source_lang': source_lang,
+        'target_lang': target_lang
+    }
+    
+    response = requests.post(url, json=data)
+    result = response.json()
+    
+    if result['code'] == 200:
+        return result['data']
+    else:
+        raise Exception(f"Translation failed: {result.get('message', 'Unknown error')}")
+
+# Usage example
+try:
+    result = translate_with_google('Hello, world!', 'en', 'zh')
     print(result)
 except Exception as e:
     print(f"Error: {e}")
@@ -220,14 +347,14 @@ A modern, free web-based translation app powered by the DeepLX API. Features inc
 
 1. [Download and install Pot for your platform](https://github.com/pot-app/pot-desktop/releases/latest)
 2. Open Pot settings and navigate to Service Settings
-3. Configure the DeepL service type as DeepLX and set the custom URL to `https://dplx.xi-xu.me/translate`
+3. Configure the DeepL service type as DeepLX and set the custom URL to `https://dplx.xi-xu.me/deepl`
 
 ### [Zotero](https://www.zotero.org/) (Open-source reference management app)
 
 1. [Download and install Zotero for your platform](https://www.zotero.org/download/)
 2. Download and install the [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate) plugin
 3. Open Zotero settings and navigate to the Services section under Translation
-4. Configure the translation service as DeepLX (API) and set the endpoint to `https://dplx.xi-xu.me/translate` after clicking the config button
+4. Configure the translation service as DeepLX (API) and set the endpoint to `https://dplx.xi-xu.me/deepl` after clicking the config button
 
 ### [PDFMathTranslate (pdf2zh)](https://github.com/Byaidu/PDFMathTranslate) (Open-source PDF document translation tool)
 
@@ -237,14 +364,14 @@ Refer to [Advanced Options](https://github.com/Byaidu/PDFMathTranslate?tab=readm
 
 1. [Install Immersive Translate](https://immersivetranslate.com/download/)
 2. Go to developer settings and enable beta testing features
-3. Go to translation services and add a custom translation service DeepLX, configure the API URL to `https://dplx.xi-xu.me/translate`
+3. Go to translation services and add a custom translation service DeepLX, configure the API URL to `https://dplx.xi-xu.me/deepl`
 4. Configure the maximum requests per second and maximum text length per request to appropriate values (e.g., `80` and `5000`) to ensure stability and performance
 
 ### [Bob](https://bobtranslate.com/) (Closed-source macOS app)
 
 1. [Download and install Bob from the Mac App Store](https://apps.apple.com/app/id1630034110)
 2. Download and install the [bob-plugin-deeplx](https://github.com/missuo/bob-plugin-deeplx) plugin
-3. Configure the plugin to use `https://dplx.xi-xu.me/translate`
+3. Configure the plugin to use `https://dplx.xi-xu.me/deepl`
 
 ## 🚀 Self-deployment
 
@@ -329,11 +456,73 @@ For optimal performance and stability, it's recommended to deploy as many [XDPL]
 
 ## 📖 API Reference
 
-### `/translate`
+### Available Endpoints
+
+| Endpoint | Provider | Description | Status |
+|----------|----------|-------------|---------|
+| `/deepl` | DeepL | Primary DeepL translation endpoint | **Recommended** |
+| `/google` | Google Translate | Google Translate endpoint | Active |
+| `/translate` | DeepL | Legacy endpoint (uses DeepL) | Legacy |
+
+### `/deepl` (Recommended)
 
 **Request Method**: `POST`
 
 **Request Headers**: `Content-Type: application/json`
+
+**Request Parameters**:
+
+| Parameter | Type | Description | Required |
+| - | - | - | - |
+| `text`        | string | Text to translate | Yes |
+| `source_lang` | string | Source language code | No, default `AUTO` |
+| `target_lang` | string | Target language code | No, default `EN` |
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "data": "Translation result",
+  "id": "Random identifier",
+  "source_lang": "Detected source language code",
+  "target_lang": "Target language code"
+}
+```
+
+### `/google`
+
+**Request Method**: `POST`
+
+**Request Headers**: `Content-Type: application/json`
+
+**Request Parameters**:
+
+| Parameter | Type | Description | Required |
+| - | - | - | - |
+| `text`        | string | Text to translate | Yes |
+| `source_lang` | string | Source language code | No, default `AUTO` |
+| `target_lang` | string | Target language code | No, default `EN` |
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "data": "Translation result",
+  "id": "Random identifier",
+  "source_lang": "Detected source language code",
+  "target_lang": "Target language code"
+}
+```
+
+### `/translate` (Legacy)
+
+**Request Method**: `POST`
+
+**Request Headers**: `Content-Type: application/json`
+
+**Note**: This is a legacy endpoint that uses DeepL. For new integrations, please use `/deepl` instead.
 
 **Request Parameters**:
 

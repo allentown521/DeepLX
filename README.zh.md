@@ -3,16 +3,22 @@
 ***[English](README.md)***
 
 [![许可证](https://img.shields.io/github/license/xixu-me/deeplx)](#-许可证)
-[![部署状态](https://img.shields.io/website?url=https://dplx.xi-xu.me/translate&label=在线服务)](#-在线服务)
+[![部署状态](https://img.shields.io/website?url=https://dplx.xi-xu.me/deepl&label=在线服务)](#-在线服务)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange?logo=cloudflare)](#-自部署)
 
-目前 [DeepLX](https://github.com/OwO-Network/DeepLX) 的最佳无服务器实现，专为 Cloudflare Workers 优化设计。通过智能代理端点轮换、高级限流算法和熔断器机制，几乎完全避免了 HTTP 429 错误，提供比 DeepL API 更高的请求速率限制和更低的网络往返时间。
+目前 [DeepLX](https://github.com/OwO-Network/DeepLX) 的最佳无服务器实现，专为 Cloudflare Workers 优化设计。通过智能代理端点轮换、高级限流算法和熔断器机制，几乎完全避免了 HTTP 429 错误，提供比传统翻译 API 更高的请求速率限制和更低的网络往返时间。**现已支持 DeepL 和 Google 翻译服务。**
 
-## 🆓 **相较于 DeepL API 完全免费**
+## 🆓 **相较于翻译 API 完全免费**
 
-**与付费的 DeepL API 不同，DeepLX 完全免费使用** - 无需 API 密钥、无订阅费用、无使用限制。只需部署一次，即可享受无限制的翻译请求，无需担心任何费用问题。
+**与付费的翻译 API 不同，DeepLX 完全免费使用** - 无需 API 密钥、无订阅费用、无使用限制。只需部署一次，即可享受无限制的翻译请求，无需担心任何费用问题。
 
 ## ✨ 特性与性能优势
+
+### 🌐 多服务提供商支持
+
+- **DeepL 翻译** (`/deepl`) - 高质量的 AI 翻译
+- **Google 翻译** (`/google`) - 广泛的语言支持和快速处理
+- **传统兼容性** (`/translate`) - 使用 DeepL 的向后兼容端点
 
 ### 🚀 性能优势
 
@@ -70,60 +76,95 @@ graph TB
         Router[Hono 路由器]
         
         subgraph "API 端点"
+            DeepL[POST /deepl]
+            Google[POST /google]
             Translate[POST /translate]
             Debug[POST /debug]
         end
         
-        subgraph "核心组件"
+        subgraph "核心中间件与组件"
+            CORS[CORS 处理器]
             Security[安全中间件]
             RateLimit[限流系统]
-            Cache[双层缓存]
-            Query[翻译引擎]
-            Proxy[代理管理]
+            Cache[双层缓存<br/>内存 + KV]
+        end
+        
+        subgraph "翻译服务"
+            QueryEngine[DeepL 查询引擎]
+            GoogleService[Google 翻译服务]
+        end
+        
+        subgraph "支持系统"
+            ProxyManager[代理管理器<br/>& 负载均衡]
+            CircuitBreaker[熔断器]
+            RetryLogic[重试逻辑]
+            ErrorHandler[错误处理器]
         end
     end
 
     %% 存储层
     subgraph "Cloudflare 存储"
-        CacheKV[(缓存 KV)]
-        RateLimitKV[(限流 KV)]
-        Analytics[(分析引擎)]
+        CacheKV[(缓存 KV<br/>翻译结果)]
+        RateLimitKV[(限流 KV<br/>令牌桶)]
+        Analytics[(分析引擎<br/>指标 & 监控)]
     end
 
     %% 外部服务
-    subgraph "翻译服务"
-        XDPL[XDPL 代理集群<br/>Vercel 部署]
+    subgraph "外部翻译 API"
+        DeepLAPI[DeepL JSONRPC API<br/>www2.deepl.com]
+        GoogleAPI[Google 翻译 API<br/>translate.google.com]
+        XDPL[XDPL 代理集群<br/>多个 Vercel 实例]
     end
 
-    %% 连接关系
+    %% 请求流连接
     Client --> Router
-    Router --> Translate
-    Router --> Debug
+    Router --> CORS
+    CORS --> DeepL
+    CORS --> Google
+    CORS --> Translate
+    CORS --> Debug
     
+    DeepL --> Security
+    Google --> Security
     Translate --> Security
+    Debug --> Security
+    
     Security --> RateLimit
     RateLimit --> Cache
-    Cache --> Query
-    Query --> Proxy
     
+    Cache --> QueryEngine
+    Cache --> GoogleService
+    
+    QueryEngine --> ProxyManager
+    GoogleService --> GoogleAPI
+    
+    ProxyManager --> CircuitBreaker
+    CircuitBreaker --> RetryLogic
+    RetryLogic --> ErrorHandler
+    
+    %% 外部 API 连接
+    ProxyManager -.-> XDPL
+    XDPL -.-> DeepLAPI
+    
+    %% 存储连接
     Cache -.-> CacheKV
     RateLimit -.-> RateLimitKV
-    Query -.-> Analytics
-    
-    Proxy --> XDPL
+    Router -.-> Analytics
 
     %% 样式
-    classDef clientClass fill:#e3f2fd,stroke:#1976d2
-    classDef workerClass fill:#f3e5f5,stroke:#7b1fa2
-    classDef coreClass fill:#e8f5e8,stroke:#388e3c
-    classDef storageClass fill:#fff3e0,stroke:#f57c00
-    classDef externalClass fill:#ffebee,stroke:#d32f2f
+    classDef clientClass fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef workerClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef middlewareClass fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef serviceClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef storageClass fill:#fce4ec,stroke:#e91e63,stroke-width:2px
+    classDef externalClass fill:#ffebee,stroke:#d32f2f,stroke-width:2px
 
     class Client clientClass
-    class Router,Translate,Debug workerClass
-    class Security,RateLimit,Cache,Query,Proxy coreClass
+    class Router,DeepL,Google,Translate,Debug workerClass
+    class CORS,Security,RateLimit,Cache middlewareClass
+    class QueryEngine,GoogleService,ProxyManager,CircuitBreaker,RetryLogic,ErrorHandler serviceClass
     class CacheKV,RateLimitKV,Analytics storageClass
-    class XDPL externalClass
+    class DeepLAPI,GoogleAPI,XDPL externalClass
 ```
 
 ## 🌐 在线服务
@@ -133,6 +174,32 @@ graph TB
 ## 📦 快速开始
 
 ### cURL 示例
+
+#### DeepL 翻译（推荐）
+
+```bash
+curl -X POST https://dplx.xi-xu.me/deepl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello, world!",
+    "source_lang": "EN",
+    "target_lang": "ZH"
+  }'
+```
+
+#### Google 翻译
+
+```bash
+curl -X POST https://dplx.xi-xu.me/google \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello, world!",
+    "source_lang": "EN",
+    "target_lang": "ZH"
+  }'
+```
+
+#### 传统端点（DeepL）
 
 ```bash
 curl -X POST https://dplx.xi-xu.me/translate \
@@ -146,9 +213,11 @@ curl -X POST https://dplx.xi-xu.me/translate \
 
 ### JavaScript 示例
 
+#### DeepL 翻译（JavaScript）
+
 ```javascript
-async function translate(text, sourceLang = 'auto', targetLang = 'zh') {
-  const response = await fetch('https://dplx.xi-xu.me/translate', {
+async function translateWithDeepL(text, sourceLang = 'auto', targetLang = 'zh') {
+  const response = await fetch('https://dplx.xi-xu.me/deepl', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -165,19 +234,47 @@ async function translate(text, sourceLang = 'auto', targetLang = 'zh') {
 }
 
 // 使用示例
-translate('Hello, world!', 'en', 'zh')
+translateWithDeepL('Hello, world!', 'en', 'zh')
+  .then(result => console.log(result))
+  .catch(error => console.error(error));
+```
+
+#### Google 翻译（JavaScript）
+
+```javascript
+async function translateWithGoogle(text, sourceLang = 'auto', targetLang = 'zh') {
+  const response = await fetch('https://dplx.xi-xu.me/google', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      text: text,
+      source_lang: sourceLang,
+      target_lang: targetLang
+    })
+  });
+  
+  const result = await response.json();
+  return result.data;
+}
+
+// 使用示例
+translateWithGoogle('Hello, world!', 'en', 'zh')
   .then(result => console.log(result))
   .catch(error => console.error(error));
 ```
 
 ### Python 示例
 
+#### DeepL 翻译（Python）
+
 ```python
 import requests
 import json
 
-def translate(text, source_lang='auto', target_lang='zh'):
-    url = 'https://dplx.xi-xu.me/translate'
+def translate_with_deepl(text, source_lang='auto', target_lang='zh'):
+    url = 'https://dplx.xi-xu.me/deepl'
     data = {
         'text': text,
         'source_lang': source_lang,
@@ -194,7 +291,37 @@ def translate(text, source_lang='auto', target_lang='zh'):
 
 # 使用示例
 try:
-    result = translate('Hello, world!', 'en', 'zh')
+    result = translate_with_deepl('Hello, world!', 'en', 'zh')
+    print(result)
+except Exception as e:
+    print(f"错误: {e}")
+```
+
+#### Google 翻译（Python）
+
+```python
+import requests
+import json
+
+def translate_with_google(text, source_lang='auto', target_lang='zh'):
+    url = 'https://dplx.xi-xu.me/google'
+    data = {
+        'text': text,
+        'source_lang': source_lang,
+        'target_lang': target_lang
+    }
+    
+    response = requests.post(url, json=data)
+    result = response.json()
+    
+    if result['code'] == 200:
+        return result['data']
+    else:
+        raise Exception(f"翻译失败: {result.get('message', '未知错误')}")
+
+# 使用示例
+try:
+    result = translate_with_google('Hello, world!', 'en', 'zh')
     print(result)
 except Exception as e:
     print(f"错误: {e}")
@@ -220,14 +347,14 @@ except Exception as e:
 
 1. [下载并安装适用于您平台的 Pot](https://github.com/pot-app/pot-desktop/releases/latest)
 2. 打开 Pot 设置并导航到服务设置
-3. 将 DeepL 服务类型配置为 DeepLX，并将自定义 URL 配置为 `https://dplx.xi-xu.me/translate`
+3. 将 DeepL 服务类型配置为 DeepLX，并将自定义 URL 配置为 `https://dplx.xi-xu.me/deepl`
 
 ### [Zotero](https://www.zotero.org/)（开源文献管理应用）
 
 1. [下载并安装适用于您平台的 Zotero](https://www.zotero.org/download/)
 2. 下载并安装 [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate) 插件
 3. 打开 Zotero 设置并导航到翻译中的服务部分
-4. 将翻译服务配置为 DeepLX（API），并点击配置按钮后将接口配置为 `https://dplx.xi-xu.me/translate`
+4. 将翻译服务配置为 DeepLX（API），并点击配置按钮后将接口配置为 `https://dplx.xi-xu.me/deepl`
 
 ### [PDFMathTranslate（pdf2zh）](https://github.com/Byaidu/PDFMathTranslate)（开源 PDF 文档翻译工具）
 
@@ -237,14 +364,14 @@ except Exception as e:
 
 1. [安装沉浸式翻译](https://immersivetranslate.com/zh-Hans/download/)
 2. 进入开发者设置并开启 beta 测试特性
-3. 进入翻译服务添加自定义翻译服务 DeepLX，将 API URL 配置为 `https://dplx.xi-xu.me/translate`
+3. 进入翻译服务添加自定义翻译服务 DeepLX，将 API URL 配置为 `https://dplx.xi-xu.me/deepl`
 4. 将每秒最大请求数和每次请求最大文本长度配置为合适的值（例如 `80` 和 `5000`），以确保稳定性和性能
 
 ### [Bob](https://bobtranslate.com/)（闭源 macOS 应用）
 
 1. [从 Mac App Store 下载并安装 Bob](https://apps.apple.com/cn/app/id1630034110)
 2. 下载并安装 [bob-plugin-deeplx](https://github.com/missuo/bob-plugin-deeplx) 插件
-3. 配置插件使用 `https://dplx.xi-xu.me/translate`
+3. 配置插件使用 `https://dplx.xi-xu.me/deepl`
 
 ## 🚀 自部署
 
@@ -329,11 +456,73 @@ npx wrangler deploy
 
 ## 📖 API 参考
 
-### `/translate`
+### 可用端点
+
+| 端点 | 服务提供商 | 描述 | 状态 |
+|----------|----------|-------------|---------|
+| `/deepl` | DeepL | 主要 DeepL 翻译端点 | **推荐** |
+| `/google` | Google 翻译 | Google 翻译端点 | 活跃 |
+| `/translate` | DeepL | 传统端点（使用 DeepL） | 传统 |
+
+### `/deepl`（推荐）
 
 **请求方法**：`POST`
 
 **请求标头**：`Content-Type: application/json`
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 | 是否必要 |
+| - | - | - | - |
+| `text`        | string | 要翻译的文本 | 是 |
+| `source_lang` | string | 源语言代码 | 否，默认值 `AUTO` |
+| `target_lang` | string | 目标语言代码 | 否，默认值 `EN` |
+
+**响应**：
+
+```json
+{
+  "code": 200,
+  "data": "翻译结果",
+  "id": "随机标识符",
+  "source_lang": "检测到的源语言代码",
+  "target_lang": "目标语言代码"
+}
+```
+
+### `/google`
+
+**请求方法**：`POST`
+
+**请求标头**：`Content-Type: application/json`
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 | 是否必要 |
+| - | - | - | - |
+| `text`        | string | 要翻译的文本 | 是 |
+| `source_lang` | string | 源语言代码 | 否，默认值 `AUTO` |
+| `target_lang` | string | 目标语言代码 | 否，默认值 `EN` |
+
+**响应**：
+
+```json
+{
+  "code": 200,
+  "data": "翻译结果",
+  "id": "随机标识符",
+  "source_lang": "检测到的源语言代码",
+  "target_lang": "目标语言代码"
+}
+```
+
+### `/translate`（传统）
+
+**请求方法**：`POST`
+
+**请求标头**：`Content-Type: application/json`
+
+**注意**：这是一个使用 DeepL 的传统端点。对于新集成，请使用 `/deepl`。
 
 **请求参数**：
 
